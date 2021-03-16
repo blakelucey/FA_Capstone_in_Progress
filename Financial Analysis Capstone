@@ -1,0 +1,100 @@
+import pandas as pd
+import numpy as np
+import matplotlib as plt
+import cvxopt as opt
+from cvxopt import blas, solvers
+from sklearn.linear_model import LinearRegression
+
+
+#Import CSVs
+ABT = pd.read_csv('ABT.csv')
+DIV = pd.read_csv('DIV.csv')
+JPM = pd.read_csv('JPM.csv')
+O = pd.read_csv('O.csv')
+TSLA = pd.read_csv('TSLA.csv')
+TSM = pd.read_csv('TSM.csv')
+
+#Calculate Daily Expected Return
+Data = ABT.join(DIV, JPM, O, TSLA, TSM)
+print(Data)
+
+daily_ER = Data.pct_change()
+avg_DER = daily_ER.mean()
+
+#Calculate Covariance
+covariance = daily_ER.cov()
+
+#Define Return Portfolios
+def return_portfolios(expected_returns, cov_matrix):
+    port_returns = []
+    port_volatility = []
+    stock_weights = []
+
+    selected = (expected_returns.axes)[0]
+
+    num_assets = len(selected)
+    num_portfolios = 5000
+
+    for single_portfolio in range(num_portfolios):
+        weights = np.random.random(num_assets)
+        weights /= np.sum(weights)
+        returns = np.dot(weights, expected_returns)
+        volatility = np.sqrt(np.dot(weights.T,np.dot(cov_matrix, weights)))
+        port_returns.append(returns)
+        port_volatility.append(volatility)
+
+        stock_weights.append(weights)
+
+    portfolio = {'Returns': port_returns, 'Volatility': port_volatility}
+
+    for counter, symbol in enumerate(selected):
+        portfolio[symbol + 'Weight'] = [Weight [counter] for Weight in stock_weights]
+
+        df = pd.Dataframe(portfolio)
+
+        column_order = ['Returns', 'Volatility'] + [stock +' Weight' for stock in selected]
+
+        df = df[column_order]
+
+        return df
+
+#Define Optimal Portfolio
+def optimal_portfolio(returns):
+    n = returns.shape[1]
+    returns = np.transpose(returns.as_matrix())
+
+    N = 100
+    mus = [10 ** (5.0 * t/N - 1.0) for t in range (N)]
+
+    #Convert to cvxopt matrices
+    S = opt.matrix(np.cov(returns))
+    pbar = opt.matrix(np.mean(returns, axis = 1))
+
+    #Create constraint matrices
+    G = -opt.matrix(np.eye(n)) #negative n x n identity matrix
+    h = opt.matrix(0.0, (n, 1))
+    A = opt.matrix(1.0, (1, n))
+    b = opt.matrix(1.0)
+
+    #Calculate efficient frontier weights using quadratic programming
+    portfolios = [solvers.qp(mu * S, -pbar, G, h, A, b)['x'] for mu in mus]
+
+    ##Calculate the 2nd degree polynomial of the frontier curve
+    m1 = np.polyfit(returns, risks, 2)
+    x1 = np.sqrt(m1[2] / m1[0])
+
+    #Calculate the optimal portfolio
+    wt = solvers.qp(opt.matrix(x1 * S), -pbar, G, h, A, b)['x']
+    return np.asarray(wt), returns, risks
+
+
+#Plot Linear Regression
+return_portfolios(daily_ER, covariance)
+
+weights, returns, risks = optimal_portfolio(daily_ER[1:])
+
+Data.plot.scatter(x = 'Volatility', y = 'Returns', fontsize = 12)
+plt.plot(risks, returns, 'y-o')
+plt.scatter(single_asset_std, daily_ER, marker = 'X', color = 'orange', s = 200)
+for xc in single_asset_std:
+    plt.axvline(x = xc, color = 'orange')
